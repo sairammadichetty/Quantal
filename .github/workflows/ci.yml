@@ -14,7 +14,12 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
+      # Full history is required so gitleaks-action can resolve the parent of
+      # the PR base commit (`<base>^..<head>`). With the default fetch-depth=1
+      # the action fails with "unknown revision" on pull_request events.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
