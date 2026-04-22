@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, List, Optional
 
 from app.core.credit_logic import calculate_text_credits
 from app.schemas.upstream import Message, Report
@@ -31,9 +30,7 @@ from app.services.orbital_client import OrbitalClient
 logger = logging.getLogger(__name__)
 
 
-async def _fetch_reports(
-    client: OrbitalClient, report_ids: List[int]
-) -> Dict[int, Optional[Report]]:
+async def _fetch_reports(client: OrbitalClient, report_ids: list[int]) -> dict[int, Report | None]:
     """Fetch all unique report IDs concurrently.
 
     Returns a dict keyed by report_id. A value of `None` means either a
@@ -53,9 +50,9 @@ async def _fetch_reports(
         return_exceptions=True,
     )
 
-    report_map: Dict[int, Optional[Report]] = {}
-    for rid, result in zip(report_ids, results):
-        if isinstance(result, Exception):
+    report_map: dict[int, Report | None] = {}
+    for rid, result in zip(report_ids, results, strict=False):
+        if isinstance(result, BaseException):
             logger.warning(
                 "Report lookup failed for id=%s, falling back to text calc: %r",
                 rid,
@@ -63,11 +60,13 @@ async def _fetch_reports(
             )
             report_map[rid] = None
         else:
+            # `result` is narrowed to `Report | None` here — the `None` arm
+            # represents a documented 404 fallback from the upstream.
             report_map[rid] = result
     return report_map
 
 
-def _build_usage_item(message: Message, report: Optional[Report]) -> UsageItem:
+def _build_usage_item(message: Message, report: Report | None) -> UsageItem:
     """Turn one raw message (+ optional report) into a `UsageItem`.
 
     If a report is attached, we use its fixed `credit_cost` and `name`.
@@ -102,7 +101,7 @@ async def build_usage_response(client: OrbitalClient) -> UsageResponse:
 
     # Convert to a list (not a set) so gather/zip pairing is deterministic.
     # Using `dict.fromkeys` preserves first-seen order for readability of logs.
-    unique_report_ids: List[int] = list(
+    unique_report_ids: list[int] = list(
         dict.fromkeys(m.report_id for m in messages if m.report_id is not None)
     )
     report_map = await _fetch_reports(client, unique_report_ids)

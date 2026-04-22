@@ -44,6 +44,48 @@ pytest
 The test suite is fully offline: upstream calls are served by
 `httpx.MockTransport` so there is no dependency on external availability.
 
+### Lint / format / type-check
+
+Dev tooling is pinned in `requirements-dev.txt`; install it once into the
+same virtualenv as the runtime deps:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Then the five quality gates (in the same order CI runs them):
+
+```bash
+ruff check .              # Lint
+ruff format --check .     # Formatting (use `ruff format .` to apply)
+mypy app                  # Strict static type checking for the app package
+pytest -q                 # Tests
+gitleaks detect --no-git  # Secret scan (also runs via pre-commit)
+```
+
+Install the pre-commit hook once per clone so every `git commit` runs
+lint, format, type-check, whitespace hygiene, and the gitleaks secret
+scanner on staged files:
+
+```bash
+pre-commit install
+pre-commit run --all-files    # one-time sweep across the tree
+```
+
+Every push/PR triggers the same gates in `.github/workflows/ci.yml`,
+plus a parallel **docker-build** job that builds the production image
+and smoke-tests it by starting the container and probing `/healthz`.
+That way CI catches Dockerfile regressions (missing deps, broken COPYs,
+image-level permission issues) before they hit a deploy environment.
+
+To reproduce the Docker build locally:
+
+```bash
+docker build -t quantal-api:local .
+docker run --rm -p 8000:8000 --env-file .env quantal-api:local
+curl http://127.0.0.1:8000/healthz
+```
+
 ---
 
 ## Contract
@@ -95,6 +137,24 @@ tests/
 
 Business logic (`core/`, `services/usage_service.py`) is deliberately
 independent of FastAPI so it can be unit-tested and reused.
+
+---
+
+## Configuration
+
+All tunables live in `.env` (see `.env.example` for the full list). The
+upstream route paths are deliberately kept in config so a new billing
+period or a v2 reports route is a deploy-time concern, not a code change:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBITAL_BASE_URL` | `https://owpublic.blob.core.windows.net/tech-task` | Upstream host + prefix. |
+| `ORBITAL_MESSAGES_PATH` | `/messages/current-period` | Override to target a different period, e.g. `/messages/2025-Q1`. |
+| `ORBITAL_REPORT_PATH_TEMPLATE` | `/reports/{report_id}` | Must contain `{report_id}`; validated at boot. |
+| `ORBITAL_HTTP_TIMEOUT_SECONDS` | `10.0` | Per-request timeout. |
+
+`tests/test_api.py::test_messages_path_is_configurable` and
+`test_report_template_is_configurable` prove both paths flow end-to-end.
 
 ---
 

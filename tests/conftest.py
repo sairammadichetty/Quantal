@@ -9,45 +9,59 @@ semantics (status codes, headers, raise_for_status, etc.).
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
 
 import httpx
 import pytest
 import pytest_asyncio
 
+from app.core.config import settings
 from app.main import app
 from app.services.orbital_client import OrbitalClient
 
 
 def _make_mock_transport(
-    messages: List[dict],
-    reports: Dict[int, Optional[dict]],
+    messages: list[dict],
+    reports: dict[int, dict | None],
 ) -> httpx.MockTransport:
     """Return a MockTransport serving the two upstream endpoints.
 
-    `reports` maps report_id -> payload. Use `None` to simulate a 404
-    (the documented fallback path). Missing IDs also 404.
+    Route matching is driven by the current `settings` values rather than
+    hardcoded literals, so overriding `ORBITAL_MESSAGES_PATH` or
+    `ORBITAL_REPORT_PATH_TEMPLATE` in a test automatically re-targets the
+    mock. `reports` maps report_id -> payload; use `None` to simulate a
+    documented 404 fallback. Unknown IDs also 404.
     """
+    # Pre-compute the expected paths once per transport so the handler stays
+    # cheap and obvious.
+    messages_path = settings.ORBITAL_MESSAGES_PATH
+    report_template = settings.ORBITAL_REPORT_PATH_TEMPLATE
+    # Split on the placeholder so we can pattern-match without regex.
+    report_prefix, report_suffix = report_template.split("{report_id}", 1)
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path.endswith("/messages/current-period"):
+        if path == messages_path:
             return httpx.Response(200, json=messages)
-        if "/reports/" in path:
-            rid = int(path.rsplit("/", 1)[-1])
+        if path.startswith(report_prefix) and path.endswith(report_suffix):
+            rid_str = path[len(report_prefix) : len(path) - len(report_suffix) or None]
+            try:
+                rid = int(rid_str)
+            except ValueError:
+                return httpx.Response(400, json={"detail": "bad report id"})
             if rid not in reports or reports[rid] is None:
                 return httpx.Response(404, json={"detail": "not found"})
             return httpx.Response(200, json=reports[rid])
-        return httpx.Response(500, json={"detail": "unexpected route"})
+        return httpx.Response(500, json={"detail": f"unexpected route: {path}"})
 
     return httpx.MockTransport(handler)
 
 
 @pytest.fixture
-def make_client() -> Callable[[List[dict], Dict[int, Optional[dict]]], OrbitalClient]:
+def make_client() -> Callable[[list[dict], dict[int, dict | None]], OrbitalClient]:
     """Factory fixture that builds an `OrbitalClient` around a MockTransport."""
 
-    def _factory(messages: List[dict], reports: Dict[int, Optional[dict]]) -> OrbitalClient:
+    def _factory(messages: list[dict], reports: dict[int, dict | None]) -> OrbitalClient:
         transport = _make_mock_transport(messages, reports)
         http_client = httpx.AsyncClient(transport=transport, base_url="http://mocked")
         return OrbitalClient(client=http_client)
@@ -69,7 +83,7 @@ async def api_client(monkeypatch):
 
 
 def install_mock_upstream(
-    messages: List[dict], reports: Dict[int, Optional[dict]]
+    messages: list[dict], reports: dict[int, dict | None]
 ) -> httpx.AsyncClient:
     """Swap the app's shared HTTP client for a MockTransport-backed one.
 

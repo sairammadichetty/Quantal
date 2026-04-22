@@ -1,0 +1,67 @@
+# Centralised tooling config. The project itself is still a plain
+# requirements.txt-driven app (no build backend needed), but Ruff and
+# mypy read their settings from here, which keeps the repo root tidy.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", ".pytest_cache", "__pycache__"]
+
+[tool.ruff.lint]
+# Small, opinionated rule-set that catches the things that actually
+# matter without drowning the author in trivia:
+#   E/F/W = pycodestyle + pyflakes (real bugs + style)
+#   I     = isort (import ordering)
+#   B     = flake8-bugbear (likely-bug patterns)
+#   UP    = pyupgrade (keep syntax current for target-version)
+#   SIM   = flake8-simplify (removes needless complexity)
+#   RUF   = ruff-specific lints
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+# Let Ruff's formatter handle line length; the linter flagging E501 on
+# top of that is just noise.
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's `Depends(...)` (and friends) are idiomatic as defaults in
+# endpoint signatures; whitelisting them turns off B008's false
+# positive without weakening the rule elsewhere.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests routinely assert on truthy values and import fixtures in ways
+# that trip a couple of otherwise-useful rules.
+"tests/*" = ["B011", "B017"]
+
+[tool.ruff.format]
+# Match the linter config so `ruff format` and `ruff check` don't fight.
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# Pydantic and FastAPI ship their own stubs; stray third-party deps
+# without stubs shouldn't blow up the whole check.
+ignore_missing_imports = true
+# Tests use fixtures, monkeypatching and loose asserts; strict mode is
+# overkill there and would add noise without catching real bugs.
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+# Pydantic v2 models mix class-level descriptors with instance attrs in
+# a way that occasionally confuses mypy's attribute checks. The plugin
+# would fix this, but it's extra config for limited return. Relax just
+# this one check to keep strict-mode signal-to-noise high.
+module = "app.schemas.*"
+disable_error_code = ["misc"]

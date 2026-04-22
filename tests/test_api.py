@@ -33,7 +33,7 @@ async def test_usage_endpoint_returns_expected_shape(api_client: httpx.AsyncClie
     # Required fields per the contract: message_id, timestamp, credits_used.
     assert item["message_id"] == 1
     assert item["timestamp"] == "2024-04-29T02:08:29.375Z"
-    assert isinstance(item["credits_used"], (int, float))
+    assert isinstance(item["credits_used"], int | float)
     # Guard against silently accepting the old field names.
     assert "id" not in item
     assert "credits" not in item
@@ -90,7 +90,7 @@ async def test_404_report_falls_back_to_text_calc(api_client: httpx.AsyncClient)
             {
                 "id": 30,
                 "timestamp": "2024-04-29T02:11:00Z",
-                "text": "aba",   # expected text-calc result: 2.0 (palindrome)
+                "text": "aba",  # expected text-calc result: 2.0 (palindrome)
                 "report_id": 404,
             },
         ],
@@ -188,3 +188,53 @@ async def test_healthz_liveness_probe(api_client: httpx.AsyncClient):
     response = await api_client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_messages_path_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, api_client: httpx.AsyncClient
+):
+    """Overriding `ORBITAL_MESSAGES_PATH` must actually re-target the upstream.
+
+    This guards against someone re-hardcoding `/messages/current-period` in
+    `OrbitalClient` later; the test would start hitting the 500 fallback in
+    the mock transport and fail loudly.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ORBITAL_MESSAGES_PATH", "/messages/2025-Q1")
+
+    install_mock_upstream(
+        messages=[
+            {"id": 99, "timestamp": "ts", "text": "Hi", "report_id": None},
+        ],
+        reports={},
+    )
+    response = await api_client.get("/usage")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["usage"][0]["message_id"] == 99
+
+
+@pytest.mark.asyncio
+async def test_report_template_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, api_client: httpx.AsyncClient
+):
+    """Overriding `ORBITAL_REPORT_PATH_TEMPLATE` re-targets the reports call."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ORBITAL_REPORT_PATH_TEMPLATE", "/v2/reports/{report_id}/detail")
+
+    install_mock_upstream(
+        messages=[
+            {"id": 7, "timestamp": "ts", "text": "ignored", "report_id": 42},
+        ],
+        reports={42: {"name": "Alt-Path Report", "credit_cost": 12.5}},
+    )
+    response = await api_client.get("/usage")
+
+    assert response.status_code == 200
+    item = response.json()["usage"][0]
+    assert item["report_name"] == "Alt-Path Report"
+    assert item["credits_used"] == 12.5
