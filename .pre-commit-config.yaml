@@ -33,3 +33,11 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-added-large-files
+
+  # Secret scanner: blocks commits that contain AWS keys, private keys,
+  # tokens, DB connection strings, etc. Uses gitleaks' default ruleset;
+  # tune via a .gitleaks.toml at the repo root if false positives appear.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks

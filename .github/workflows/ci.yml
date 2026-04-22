@@ -39,3 +39,10 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+      # Secret scan: fails the build if any tracked file (or the full git
+      # history on push) contains credentials matching gitleaks' ruleset.
+      - name: Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

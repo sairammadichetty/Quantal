@@ -53,25 +53,28 @@ same virtualenv as the runtime deps:
 pip install -r requirements-dev.txt
 ```
 
-Then the four quality gates (in the same order CI runs them):
+Then the five quality gates (in the same order CI runs them):
 
 ```bash
 ruff check .              # Lint
 ruff format --check .     # Formatting (use `ruff format .` to apply)
 mypy app                  # Strict static type checking for the app package
 pytest -q                 # Tests
+gitleaks detect --no-git  # Secret scan (also runs via pre-commit)
 ```
 
-Optional but recommended — install the pre-commit hook so the first three
-checks run automatically on every `git commit`:
+Install the pre-commit hook once per clone so every `git commit` runs
+lint, format, type-check, whitespace hygiene, and the gitleaks secret
+scanner on staged files:
 
 ```bash
 pre-commit install
 pre-commit run --all-files    # one-time sweep across the tree
 ```
 
-Every push/PR triggers the same four gates in `.github/workflows/ci.yml`,
-so local and CI results are identical.
+Every push/PR triggers the same gates in `.github/workflows/ci.yml`,
+including a gitleaks secret scan over the commit range, so local and
+CI results are identical.
 
 ---
 
