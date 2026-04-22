@@ -1,32 +1,44 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
 class Settings(BaseSettings):
-    # App Settings
+    """Central configuration for the Usage API.
+
+    All external-service URLs and tunables live here so tests and deployments
+    can override them via environment variables (or a .env file) without
+    touching source. `OrbitalClient` reads these values rather than hard-coding
+    them, keeping infrastructure concerns out of the service layer.
+    """
+
     APP_NAME: str = "Orbital Copilot Usage API"
     DEBUG: bool = False
-    
-    # External API Base URLs
-    # Using the URLs from your technical task as defaults
-    ORBITAL_BASE_URL: str = "https://windows.net"
-    
-    # Pydantic Settings Config
+
+    # Upstream base URL as provided by the task brief. Kept without a trailing
+    # slash so callers can join paths predictably (`/messages/current-period`,
+    # `/reports/{id}`).
+    ORBITAL_BASE_URL: str = "https://owpublic.blob.core.windows.net/tech-task"
+
+    # Per-request HTTP timeout in seconds. Exposed as a setting so ops can tune
+    # it without a redeploy if the upstream gets slow.
+    ORBITAL_HTTP_TIMEOUT_SECONDS: float = 10.0
+
     model_config = SettingsConfigDict(
-        # Looks for a .env file in the project root
-        env_file=".env", 
-        # Optional: ignores extra environment variables not defined here
+        env_file=".env",
         extra="ignore",
-        # Case-sensitive matching for env vars
-        case_sensitive=True
+        case_sensitive=True,
     )
 
+
 @lru_cache()
-def get_settings():
-    """
-    Creates a cached instance of settings.
-    Using lru_cache ensures we don't re-read the .env file on every call.
+def get_settings() -> Settings:
+    """Return a process-wide cached Settings instance.
+
+    `lru_cache` avoids re-parsing the .env file on every call and gives us a
+    single object to monkeypatch in tests via `get_settings.cache_clear()`.
     """
     return Settings()
 
-# Global settings instance for easy importing
+
 settings = get_settings()

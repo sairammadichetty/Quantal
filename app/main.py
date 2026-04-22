@@ -1,74 +1,73 @@
-from fastapi import FastAPI, HTTPException
-from app.services.orbital_client import OrbitalClient
-from app.core.credit_logic import calculate_text_credits
-from app.schemas.usage import UsageResponse
-import asyncio
+"""FastAPI application entrypoint.
+
+This file is deliberately small: it is the *composition root* of the app.
+It:
+
+1. Configures logging.
+2. Manages the lifecycle of the shared `httpx.AsyncClient` (connection
+   pooling, single TLS session) via FastAPI's `lifespan` context manager.
+3. Registers routers and exception handlers.
+
+Business logic lives in `app.services.*` and route handlers in
+`app.api.v1.endpoints`.
+"""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+
+import httpx
+from fastapi import FastAPI
+
+from app.api.v1.endpoints import router as v1_router
+from app.core.config import settings
+
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Own the single shared httpx client for the app's lifetime.
+
+    Creating the client per-request (as the original implementation did)
+    forces a new TCP + TLS handshake every time and wastes ~hundreds of ms
+    per call. A shared client gives us connection pooling for free.
+    """
+    client = httpx.AsyncClient(
+        base_url=settings.ORBITAL_BASE_URL,
+        timeout=settings.ORBITAL_HTTP_TIMEOUT_SECONDS,
+    )
+    app.state.http_client = client
+    logger.info("HTTP client started (base_url=%s)", settings.ORBITAL_BASE_URL)
+    try:
+        yield
+    finally:
+        await client.aclose()
+        logger.info("HTTP client closed")
+
 
 app = FastAPI(
-    title="Orbital Copilot Usage API",
-    description="Calculates credit consumption for legal document queries.",
-    version="1.0.0"
+    title=settings.APP_NAME,
+    description="Calculates credit consumption for Orbital Copilot messages.",
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
-@app.get("/usage", response_model=UsageResponse)
-async def get_usage():
-    """
-    Main endpoint to fetch current billing period data and calculate 
-    credits based on report IDs or message text logic.
-    """
-    orbital = OrbitalClient()
-    
-    try:
-        # 1. Fetch raw messages from the external storage API
-        messages = await orbital.get_messages()
+app.include_router(v1_router)
 
-        # 2. Extract unique report IDs to batch requests (Performance Optimization)
-        report_ids = {m["report_id"] for m in messages if m.get("report_id")}
-        
-        # 3. Fetch report details concurrently using asyncio
-        # This prevents O(n) latency bottlenecks
-        tasks = [orbital.get_report_data(rid) for rid in report_ids]
-        report_results = await asyncio.gather(*tasks)
-        
-        # Map successful report fetches to their ID for O(1) lookup
-        report_map = {rid: data for rid, data in zip(report_ids, report_results) if data}
 
-        # 4. Process each message into the required JSON contract
-        usage_output = []
-        for msg in messages:
-            report_id = msg.get("report_id")
-            report_info = report_map.get(report_id)
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> dict:
+    """Lightweight liveness probe for container orchestrators."""
+    return {"status": "ok"}
 
-            # Rule: If report exists and lookup didn't 404, use fixed cost
-            if report_id and report_info:
-                credits = float(report_info["credit_cost"])
-                report_name = report_info["name"]
-            else:
-                # Rule: Fallback to text calculation (if no ID or if ID returned 404)
-                credits = calculate_text_credits(msg.get("text", ""))
-                report_name = None
-
-            # Construct item matching the exact contract requirement
-            item = {
-                "id": msg["id"],
-                "timestamp": msg["timestamp"],
-                "credits": credits
-            }
-            # Omit report_name if it doesn't exist
-            if report_name:
-                item["report_name"] = report_name
-                
-            usage_output.append(item)
-
-        return {"usage": usage_output}
-
-    except Exception as e:
-        # Production tip: In a real app, log the error here
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-    finally:
-        # Ensure the HTTP client session is closed
-        await orbital.close()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000)

@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   api:
     build: .
@@ -6,5 +5,15 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    # Bind-mount source into the container for dev ergonomics, and override
+    # the command so uvicorn watches for changes. Remove `--reload` (or use
+    # the Dockerfile's default CMD) for a prod-like run.
     volumes:
-      - ./app:/app/app # Allows hot-reloading during their review
+      - ./app:/app/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

@@ -1,41 +1,60 @@
-@app.get("/usage", response_model=UsageResponse)
-async def get_usage():
-    orbital = OrbitalClient()
+"""HTTP routes for the v1 API.
+
+The route is intentionally thin: it delegates to `build_usage_response`
+and catches upstream-specific failures so we can map them to appropriate
+HTTP status codes. Anything unexpected is re-raised to be handled by the
+global exception handler registered in `main.py`.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from app.schemas.usage import UsageResponse
+from app.services.orbital_client import OrbitalClient
+from app.services.usage_service import build_usage_response
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def get_orbital_client(request: Request) -> OrbitalClient:
+    """FastAPI dependency that yields a client wrapping the shared httpx pool.
+
+    The underlying `httpx.AsyncClient` is created once in the lifespan and
+    reused across requests; passing it into `OrbitalClient(client=...)`
+    prevents the client from closing it when the request ends.
+    """
+    return OrbitalClient(client=request.app.state.http_client)
+
+
+@router.get(
+    "/usage",
+    response_model=UsageResponse,
+    # Critical: honour the contract that `report_name` is omitted, not `null`.
+    response_model_exclude_none=True,
+    summary="Return usage for the current billing period",
+)
+async def get_usage(client: OrbitalClient = Depends(get_orbital_client)) -> UsageResponse:
     try:
-        # 1. Get messages first
-        messages = await orbital.get_messages()
-
-        # 2. Extract unique report IDs to avoid redundant API calls
-        report_ids = {m["report_id"] for m in messages if m.get("report_id")}
-        
-        # 3. Fetch all report details CONCURRENTLY
-        tasks = [orbital.get_report_data(rid) for rid in report_ids]
-        report_results = await asyncio.gather(*tasks)
-        
-        # Map IDs to their details for easy lookup
-        report_map = {rid: data for rid, data in zip(report_ids, report_results) if data}
-
-        # 4. Final calculation loop
-        usage_data = []
-        for msg in messages:
-            report_id = msg.get("report_id")
-            report_info = report_map.get(report_id)
-
-            if report_id and report_info:
-                # Use fixed report cost
-                credits = report_info["credit_cost"]
-                report_name = report_info["name"]
-            else:
-                # FALLBACK: Use the complex credit_logic function from previous step
-                credits = calculate_text_credits(msg["text"])
-                report_name = None
-
-            # Build the specific JSON contract
-            item = {"id": msg["id"], "timestamp": msg["timestamp"], "credits": credits}
-            if report_name:
-                item["report_name"] = report_name
-            usage_data.append(item)
-
-        return {"usage": usage_data}
-    finally:
-        await orbital.close()
+        return await build_usage_response(client)
+    except httpx.HTTPStatusError as exc:
+        # Upstream returned a non-2xx that we chose not to handle (e.g. 5xx
+        # on the messages endpoint). Map to 502 so callers can distinguish
+        # "our bug" from "dependency is unhappy".
+        logger.exception("Upstream returned an error status")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Upstream service error",
+        ) from exc
+    except httpx.HTTPError as exc:
+        # Network-level failure (timeout, DNS, connection reset, etc.).
+        logger.exception("Upstream network error")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Upstream service unavailable",
+        ) from exc
