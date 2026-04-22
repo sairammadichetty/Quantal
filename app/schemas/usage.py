@@ -8,8 +8,6 @@ see `response_model_exclude_none=True` on the route.
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -32,7 +30,7 @@ class UsageItem(BaseModel):
     # need to construct it explicitly. The contract defines this field as
     # appearing *before* `credits_used` when present; Pydantic honours the
     # declaration order below when serialising.
-    report_name: Optional[str] = Field(default=None)
+    report_name: str | None = Field(default=None)
 
     # `float` is acceptable given the 2dp quantisation we apply in the
     # credit engine. For stricter money handling we could swap this for
@@ -45,4 +43,4 @@ class UsageItem(BaseModel):
 class UsageResponse(BaseModel):
     """Top-level response body: `{ "usage": [ ... ] }`."""
 
-    usage: List[UsageItem]
+    usage: list[UsageItem]

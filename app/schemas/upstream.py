@@ -8,8 +8,6 @@ as a confusing `KeyError` deep inside the credit calculation.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,8 +19,8 @@ class Message(BaseModel):
     timestamp: str
     # `text` is optional because report-only messages do not strictly need it
     # (the brief says "ignore the message text" when a report_id is present).
-    text: Optional[str] = None
-    report_id: Optional[int] = None
+    text: str | None = None
+    report_id: int | None = None
 
     model_config = ConfigDict(extra="ignore")
 

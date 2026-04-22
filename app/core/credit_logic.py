@@ -36,9 +36,9 @@ from decimal import ROUND_HALF_UP, Decimal
 # readable when they want to reference the same values.
 _BASE_COST = Decimal("1.0")
 _PER_CHAR_COST = Decimal("0.05")
-_SHORT_WORD_COST = Decimal("0.1")   # 1-3 chars
-_MID_WORD_COST = Decimal("0.2")     # 4-7 chars
-_LONG_WORD_COST = Decimal("0.3")    # 8+ chars
+_SHORT_WORD_COST = Decimal("0.1")  # 1-3 chars
+_MID_WORD_COST = Decimal("0.2")  # 4-7 chars
+_LONG_WORD_COST = Decimal("0.3")  # 8+ chars
 _THIRD_VOWEL_COST = Decimal("0.3")
 _LENGTH_PENALTY = Decimal("5.0")
 _LENGTH_PENALTY_THRESHOLD = 100

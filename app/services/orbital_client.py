@@ -11,8 +11,6 @@ injecting an `httpx.AsyncClient` backed by `httpx.MockTransport`.
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 import httpx
 
 from app.core.config import settings
@@ -22,37 +20,48 @@ from app.schemas.upstream import Message, Report
 class OrbitalClient:
     """Async client for the two upstream endpoints described in the brief."""
 
-    def __init__(self, client: Optional[httpx.AsyncClient] = None) -> None:
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(
             base_url=settings.ORBITAL_BASE_URL,
             timeout=settings.ORBITAL_HTTP_TIMEOUT_SECONDS,
         )
 
-    async def get_messages(self) -> List[Message]:
+    async def get_messages(self) -> list[Message]:
         """Return all messages for the current billing period.
+
+        The path is read from `settings.ORBITAL_MESSAGES_PATH` so deployments
+        can point at a different billing-period endpoint (e.g.
+        `/messages/2025-Q1`) without a code change.
 
         Any non-2xx is raised: there is no sensible fallback if we cannot
         enumerate messages. Upstream payload shape is validated by Pydantic
         so a contract change surfaces with a clear error here rather than a
         `KeyError` deep inside the credit engine.
         """
-        response = await self.client.get("/messages/current-period")
+        response = await self.client.get(settings.ORBITAL_MESSAGES_PATH)
         response.raise_for_status()
         payload = response.json()
         # Defensive against a `{"messages": [...]}` shape; the brief documents
         # a bare list but we accept either.
-        raw = payload["messages"] if isinstance(payload, dict) and "messages" in payload else payload
+        raw = (
+            payload["messages"] if isinstance(payload, dict) and "messages" in payload else payload
+        )
         return [Message.model_validate(item) for item in raw]
 
-    async def get_report(self, report_id: int) -> Optional[Report]:
+    async def get_report(self, report_id: int) -> Report | None:
         """Return the report metadata, or `None` if the upstream 404s.
+
+        The URL is built from `settings.ORBITAL_REPORT_PATH_TEMPLATE` which
+        must contain a `{report_id}` placeholder (enforced at settings-load
+        time, so a bad template fails fast on boot rather than mid-request).
 
         404 is a documented fallback signal per the brief, not an error, so
         we swallow it and return None. Any other non-2xx is raised so a real
         upstream outage isn't silently masked as a text-calc fallback.
         """
-        response = await self.client.get(f"/reports/{report_id}")
+        path = settings.ORBITAL_REPORT_PATH_TEMPLATE.format(report_id=report_id)
+        response = await self.client.get(path)
         if response.status_code == 404:
             return None
         response.raise_for_status()
