@@ -46,3 +46,44 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Verifies the container image the service actually ships as:
+  #   1. `docker build` proves the Dockerfile still works end-to-end
+  #      (deps install, app source copies in, non-root user, etc.).
+  #   2. `docker run` + `/healthz` probe proves the built image boots
+  #      and the ASGI app serves traffic, catching issues that unit
+  #      tests on the host Python would miss.
+  # Runs in parallel with `checks` so overall wall time stays low.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: quantal-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (boot container + /healthz)
+        run: |
+          set -euo pipefail
+          docker run -d --name api -p 8000:8000 quantal-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz > /dev/null; then
+              echo "healthz OK after ${i}s"
+              docker rm -f api
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/healthz never returned 200 within 30s"
+          docker logs api || true
+          docker rm -f api || true
+          exit 1

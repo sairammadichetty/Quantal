@@ -73,8 +73,18 @@ pre-commit run --all-files    # one-time sweep across the tree
 ```
 
 Every push/PR triggers the same gates in `.github/workflows/ci.yml`,
-including a gitleaks secret scan over the commit range, so local and
-CI results are identical.
+plus a parallel **docker-build** job that builds the production image
+and smoke-tests it by starting the container and probing `/healthz`.
+That way CI catches Dockerfile regressions (missing deps, broken COPYs,
+image-level permission issues) before they hit a deploy environment.
+
+To reproduce the Docker build locally:
+
+```bash
+docker build -t quantal-api:local .
+docker run --rm -p 8000:8000 --env-file .env quantal-api:local
+curl http://127.0.0.1:8000/healthz
+```
 
 ---
 
