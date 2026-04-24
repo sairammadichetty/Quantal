@@ -1,0 +1,12 @@
+# Install the runtime deps first, then layer dev tooling on top.
+-r requirements.txt
+
+# Lint + format (one tool, fast; replaces flake8/isort/black).
+ruff==0.6.9
+
+# Static type checking. The codebase is fully type-hinted so mypy in
+# --strict mode pays for itself immediately.
+mypy==1.11.2
+
+# Local commit-time gate so checks run before code ever hits CI.
+pre-commit==3.8.0

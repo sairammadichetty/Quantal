@@ -1,21 +1,11 @@
-"""FastAPI application entrypoint.
-
-This file is deliberately small: it is the *composition root* of the app.
-It:
-
-1. Configures logging.
-2. Manages the lifecycle of the shared `httpx.AsyncClient` (connection
-   pooling, single TLS session) via FastAPI's `lifespan` context manager.
-3. Registers routers and exception handlers.
-
-Business logic lives in `app.services.*` and route handlers in
-`app.api.v1.endpoints`.
-"""
+"""FastAPI application entrypoint."""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
@@ -31,13 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Own the single shared httpx client for the app's lifetime.
-
-    Creating the client per-request (as the original implementation did)
-    forces a new TCP + TLS handshake every time and wastes ~hundreds of ms
-    per call. A shared client gives us connection pooling for free.
-    """
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # One shared httpx client for the whole app -> connection pooling,
+    # single TLS session. Per-request clients were costing us a handshake
+    # per call.
     client = httpx.AsyncClient(
         base_url=settings.ORBITAL_BASE_URL,
         timeout=settings.ORBITAL_HTTP_TIMEOUT_SECONDS,
@@ -62,7 +49,7 @@ app.include_router(v1_router)
 
 
 @app.get("/healthz", include_in_schema=False)
-async def healthz() -> dict:
+async def healthz() -> dict[str, Any]:
     """Lightweight liveness probe for container orchestrators."""
     return {"status": "ok"}
 

@@ -1,0 +1,54 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", ".pytest_cache", "__pycache__"]
+
+[tool.ruff.lint]
+# Small, opinionated rule-set that catches the things that actually
+# matter without drowning the author in trivia:
+#   E/F/W = pycodestyle + pyflakes (real bugs + style)
+#   I     = isort (import ordering)
+#   B     = flake8-bugbear (likely-bug patterns)
+#   UP    = pyupgrade (keep syntax current for target-version)
+#   SIM   = flake8-simplify (removes needless complexity)
+#   RUF   = ruff-specific lints
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+# Let the formatter own line length; E501 on top of that is just noise.
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends(...) is idiomatic as a default in endpoint signatures.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+# Tests use fixtures, monkeypatching, loose asserts — strict adds noise
+# without catching real bugs there.
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+# Pydantic v2 class-level descriptors vs instance attrs confuse mypy's
+# attribute checks occasionally. The plugin fixes it, but relaxing this
+# one code keeps strict signal-to-noise high without extra config.
+module = "app.schemas.*"
+disable_error_code = ["misc"]

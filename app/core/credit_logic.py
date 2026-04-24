@@ -1,44 +1,15 @@
-"""Text-based credit calculation for messages without a valid report_id.
-
-Every rule in the brief is implemented here as a small, commented step so
-a reviewer can diff the code against the spec line-by-line.
-
-Implementation notes:
-
-- We use `decimal.Decimal` internally to avoid binary-float drift
-  (e.g. `0.1 + 0.2 == 0.30000000000000004`). The final value is quantised
-  to 2 decimal places before being cast to `float` at the boundary. For
-  this task 2dp is plenty; if Product ever requires more precision we can
-  expose the unrounded `Decimal` directly.
-
-- "Word" is defined by the brief as "any continual sequence of letters,
-  plus ' and -". We interpret that as: a token made of letters/'/-
-  that *contains at least one letter*. That excludes stray tokens like
-  "-" or "'-" that the naive `[a-zA-Z'-]+` regex would otherwise count
-  (and charge for).
-
-- Rule ordering matters and is subtle. The brief says:
-    • Unique Word Bonus: "subtract 2 ... (minimum should still be 1 credit)"
-    • Palindromes:       "double ... after all other rules have been applied"
-  We therefore floor at 1.0 *before* palindrome doubling. A strict reading
-  of "minimum cost should still be 1 credit" as a final-floor would
-  produce different values for some inputs; we chose the reading that
-  keeps the palindrome rule meaningful (doubling a 1.0 floor to 2.0).
-  This is called out in the README.
-"""
+"""Text-based credit calculation for messages without a report_id."""
 
 from __future__ import annotations
 
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-# Module-level constants: easier to see/edit, and they make the tests
-# readable when they want to reference the same values.
 _BASE_COST = Decimal("1.0")
 _PER_CHAR_COST = Decimal("0.05")
-_SHORT_WORD_COST = Decimal("0.1")   # 1-3 chars
-_MID_WORD_COST = Decimal("0.2")     # 4-7 chars
-_LONG_WORD_COST = Decimal("0.3")    # 8+ chars
+_SHORT_WORD_COST = Decimal("0.1")  # 1-3 chars
+_MID_WORD_COST = Decimal("0.2")  # 4-7 chars
+_LONG_WORD_COST = Decimal("0.3")  # 8+ chars
 _THIRD_VOWEL_COST = Decimal("0.3")
 _LENGTH_PENALTY = Decimal("5.0")
 _LENGTH_PENALTY_THRESHOLD = 100
@@ -46,20 +17,17 @@ _UNIQUE_WORD_BONUS = Decimal("2.0")
 _MIN_COST = Decimal("1.0")
 _VOWELS = frozenset("aeiouAEIOU")
 
-# "Word" = at least one letter, optionally interspersed with ' and -.
-# This deliberately rejects tokens like "-" or "''" that the naive
-# `[a-zA-Z'-]+` pattern would match.
+# A word must contain at least one letter; this rejects stray "-" / "'" tokens
+# that a naive [A-Za-z'-]+ would otherwise charge for.
 _WORD_RE = re.compile(r"[A-Za-z'-]*[A-Za-z][A-Za-z'-]*")
 
 
 def calculate_text_credits(message: str) -> float:
-    """Compute the credit cost for a plain-text (non-report) message.
+    """Return the credit cost for a plain-text message, rounded to 2dp.
 
-    Returns a `float` quantised to 2dp for convenient JSON serialisation.
-    All internal maths is done with `Decimal` to keep intermediate values
-    exact.
+    Internal maths uses Decimal to avoid float drift (0.1 + 0.2 != 0.3).
     """
-    # `Decimal(0)` is safe for an empty string: base cost below still
+    # Rule 1 - Base cost - `Decimal(0)` is safe for an empty string: base cost below still
     # applies, matching the brief.
     total = _BASE_COST
 
@@ -90,15 +58,14 @@ def calculate_text_credits(message: str) -> float:
     if len(message) > _LENGTH_PENALTY_THRESHOLD:
         total += _LENGTH_PENALTY
 
-    # Rule 6 — unique word bonus (case-sensitive). Skip the check when
-    # there are no words, otherwise `set()==list()` trivially matches and
-    # we'd hand out a bonus for punctuation-only messages.
+    # Skip the unique-word check on word-less messages, otherwise set() == list()
+    # trivially matches and we'd hand out a bonus for pure punctuation.
     if words and len(set(words)) == len(words):
         total -= _UNIQUE_WORD_BONUS
 
-    # Floor at the minimum cost *before* the palindrome doubling so that
-    # the palindrome rule operates on a sensible value. See module
-    # docstring for the rationale.
+    # Floor before the palindrome doubling. A stricter reading of the brief
+    # would floor only at the end, but then palindromes like "aba" never
+    # actually double (see README for the reasoning).
     if total < _MIN_COST:
         total = _MIN_COST
 
