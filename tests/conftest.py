@@ -1,10 +1,8 @@
 """Shared pytest fixtures.
 
-Tests never hit the real upstream. We build an `httpx.AsyncClient` on top
-of `httpx.MockTransport` so route handlers and the service layer see a
-perfectly normal client — but requests are served by our in-process
-handler. This gives us deterministic, offline tests with realistic HTTP
-semantics (status codes, headers, raise_for_status, etc.).
+Tests never hit the real upstream — we wrap httpx.MockTransport around the
+same AsyncClient the app uses, so route handlers and the service layer
+see a normal client but requests are served in-process.
 """
 
 from __future__ import annotations
@@ -24,19 +22,14 @@ def _make_mock_transport(
     messages: list[dict],
     reports: dict[int, dict | None],
 ) -> httpx.MockTransport:
-    """Return a MockTransport serving the two upstream endpoints.
+    """MockTransport serving the two upstream endpoints.
 
-    Route matching is driven by the current `settings` values rather than
-    hardcoded literals, so overriding `ORBITAL_MESSAGES_PATH` or
-    `ORBITAL_REPORT_PATH_TEMPLATE` in a test automatically re-targets the
-    mock. `reports` maps report_id -> payload; use `None` to simulate a
-    documented 404 fallback. Unknown IDs also 404.
+    Route matching uses the current settings so tests that override
+    ORBITAL_MESSAGES_PATH / ORBITAL_REPORT_PATH_TEMPLATE automatically
+    re-target the mock. A report value of None simulates the 404 fallback.
     """
-    # Pre-compute the expected paths once per transport so the handler stays
-    # cheap and obvious.
     messages_path = settings.ORBITAL_MESSAGES_PATH
     report_template = settings.ORBITAL_REPORT_PATH_TEMPLATE
-    # Split on the placeholder so we can pattern-match without regex.
     report_prefix, report_suffix = report_template.split("{report_id}", 1)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -59,8 +52,6 @@ def _make_mock_transport(
 
 @pytest.fixture
 def make_client() -> Callable[[list[dict], dict[int, dict | None]], OrbitalClient]:
-    """Factory fixture that builds an `OrbitalClient` around a MockTransport."""
-
     def _factory(messages: list[dict], reports: dict[int, dict | None]) -> OrbitalClient:
         transport = _make_mock_transport(messages, reports)
         http_client = httpx.AsyncClient(transport=transport, base_url="http://mocked")
@@ -71,11 +62,10 @@ def make_client() -> Callable[[list[dict], dict[int, dict | None]], OrbitalClien
 
 @pytest_asyncio.fixture
 async def api_client(monkeypatch):
-    """An `httpx.AsyncClient` pointed at the FastAPI app in-process.
+    """AsyncClient pointed at the FastAPI app in-process.
 
-    Tests that need a specific upstream response should override
-    `app.state.http_client` with a MockTransport-backed client inside the
-    test — this fixture only stands up the app itself.
+    Tests that need a specific upstream response call install_mock_upstream
+    to swap app.state.http_client for a MockTransport-backed one.
     """
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -85,13 +75,7 @@ async def api_client(monkeypatch):
 def install_mock_upstream(
     messages: list[dict], reports: dict[int, dict | None]
 ) -> httpx.AsyncClient:
-    """Swap the app's shared HTTP client for a MockTransport-backed one.
-
-    Returns the installed client so tests can inspect request history if
-    needed. The app's lifespan will still try to close its own client on
-    shutdown; since we replaced `app.state.http_client`, we close the
-    original here to keep the event loop tidy.
-    """
+    """Swap the app's shared HTTP client for a MockTransport-backed one."""
     transport = _make_mock_transport(messages, reports)
     mocked = httpx.AsyncClient(transport=transport, base_url="http://mocked")
     app.state.http_client = mocked

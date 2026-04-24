@@ -1,10 +1,6 @@
-# Install once per clone with `pre-commit install`. Hooks then run
-# automatically on staged files before each commit, giving fast local
-# feedback identical to what CI enforces.
+# Install once per clone: `pre-commit install`
 
 repos:
-  # Ruff: lint + format in a single repo/binary. `ruff` applies
-  # autofixes for safe lint violations; `ruff-format` reformats.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
@@ -34,9 +30,7 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
 
-  # Secret scanner: blocks commits that contain AWS keys, private keys,
-  # tokens, DB connection strings, etc. Uses gitleaks' default ruleset;
-  # tune via a .gitleaks.toml at the repo root if false positives appear.
+  # Blocks commits containing AWS keys, private keys, tokens, DB URIs, etc.
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:

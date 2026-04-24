@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, env/dev1]
+    branches: [main, env/**]
   pull_request:
 
 concurrency:
@@ -14,9 +14,7 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      # Full history is required so gitleaks-action can resolve the parent of
-      # the PR base commit (`<base>^..<head>`). With the default fetch-depth=1
-      # the action fails with "unknown revision" on pull_request events.
+      # Full history so gitleaks can resolve the PR base commit's parent.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -45,20 +43,12 @@ jobs:
       - name: Pytest
         run: pytest -q
 
-      # Secret scan: fails the build if any tracked file (or the full git
-      # history on push) contains credentials matching gitleaks' ruleset.
       - name: Gitleaks (secret scan)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Verifies the container image the service actually ships as:
-  #   1. `docker build` proves the Dockerfile still works end-to-end
-  #      (deps install, app source copies in, non-root user, etc.).
-  #   2. `docker run` + `/healthz` probe proves the built image boots
-  #      and the ASGI app serves traffic, catching issues that unit
-  #      tests on the host Python would miss.
-  # Runs in parallel with `checks` so overall wall time stays low.
+  # Runs in parallel with `checks` to keep wall time down.
   docker-build:
     runs-on: ubuntu-latest
     steps:

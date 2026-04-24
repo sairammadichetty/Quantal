@@ -1,13 +1,4 @@
-"""Thin async HTTP client for the Orbital Copilot upstream services.
-
-This module owns HTTP concerns only: base URL, timeouts, and the
-documented "404 means fall back to text calculation" semantic for the
-reports endpoint. It returns validated Pydantic models so the service
-layer never touches raw dicts.
-
-Keeping the surface narrow makes this trivial to mock in tests by
-injecting an `httpx.AsyncClient` backed by `httpx.MockTransport`.
-"""
+"""Async HTTP client for the Orbital Copilot upstream."""
 
 from __future__ import annotations
 
@@ -18,8 +9,6 @@ from app.schemas.upstream import Message, Report
 
 
 class OrbitalClient:
-    """Async client for the two upstream endpoints described in the brief."""
-
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(
@@ -28,37 +17,21 @@ class OrbitalClient:
         )
 
     async def get_messages(self) -> list[Message]:
-        """Return all messages for the current billing period.
-
-        The path is read from `settings.ORBITAL_MESSAGES_PATH` so deployments
-        can point at a different billing-period endpoint (e.g.
-        `/messages/2025-Q1`) without a code change.
-
-        Any non-2xx is raised: there is no sensible fallback if we cannot
-        enumerate messages. Upstream payload shape is validated by Pydantic
-        so a contract change surfaces with a clear error here rather than a
-        `KeyError` deep inside the credit engine.
-        """
         response = await self.client.get(settings.ORBITAL_MESSAGES_PATH)
         response.raise_for_status()
         payload = response.json()
-        # Defensive against a `{"messages": [...]}` shape; the brief documents
-        # a bare list but we accept either.
+        # The brief documents a bare list, but some deployments wrap it in
+        # {"messages": [...]} — accept either.
         raw = (
             payload["messages"] if isinstance(payload, dict) and "messages" in payload else payload
         )
         return [Message.model_validate(item) for item in raw]
 
     async def get_report(self, report_id: int) -> Report | None:
-        """Return the report metadata, or `None` if the upstream 404s.
+        """Return report metadata, or None when the upstream 404s.
 
-        The URL is built from `settings.ORBITAL_REPORT_PATH_TEMPLATE` which
-        must contain a `{report_id}` placeholder (enforced at settings-load
-        time, so a bad template fails fast on boot rather than mid-request).
-
-        404 is a documented fallback signal per the brief, not an error, so
-        we swallow it and return None. Any other non-2xx is raised so a real
-        upstream outage isn't silently masked as a text-calc fallback.
+        A 404 is the documented fallback signal (use text calc instead);
+        any other non-2xx is raised so a real outage isn't masked.
         """
         path = settings.ORBITAL_REPORT_PATH_TEMPLATE.format(report_id=report_id)
         response = await self.client.get(path)
@@ -68,10 +41,7 @@ class OrbitalClient:
         return Report.model_validate(response.json())
 
     async def close(self) -> None:
-        """Close the underlying HTTP client iff we created it.
-
-        When a caller injects their own client (FastAPI lifespan, tests), we
-        leave lifecycle management to them.
-        """
+        # Only close clients we created ourselves; an injected client
+        # belongs to the caller (FastAPI lifespan, tests).
         if self._owns_client:
             await self.client.aclose()
